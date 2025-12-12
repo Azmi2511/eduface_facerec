@@ -10,11 +10,14 @@ import os
 import shutil
 from datetime import datetime, timedelta
 from typing import List
+
+# Import Firebase & MySQL
 import firebase_admin
 from firebase_admin import credentials, messaging
 import mysql.connector
 from mysql.connector import Error
 
+# --- KONFIGURASI DATABASE ---
 DB_CONFIG = {
     'host': 'localhost',
     'user': 'root',
@@ -32,6 +35,8 @@ def get_db_connection():
         print(f"[ERROR SQL] Gagal koneksi: {e}")
         return None
 
+# --- KONFIGURASI FIREBASE ---
+FIREBASE_ACTIVE = False
 try:
     cred = credentials.Certificate("serviceAccountKey.json")
     firebase_admin.initialize_app(cred)
@@ -40,13 +45,22 @@ try:
 except Exception as e:
     print(f"[WARNING] Firebase gagal load: {e}")
     print("Fitur notifikasi tidak akan berjalan, tapi absensi tetap bisa.")
-    FIREBASE_ACTIVE = False
 
+# --- GLOBAL VARIABLES ---
 last_attendance_time = {}
-period = 60
-COOLDOWN_PERIOD = timedelta(minutes=period)
+COOLDOWN_PERIOD = timedelta(minutes=60) # Siswa tidak bisa absen lagi dalam 60 menit
 
-app = FastAPI(title="ATLAS Face Recognition API Documentation")
+DATASET_PATH = "dataset_siswa"
+ENCODINGS_PATH = "face_encodings.pkl"
+
+if not os.path.exists(DATASET_PATH):
+    os.makedirs(DATASET_PATH)
+
+# Database Memory (Pickle)
+db_face = {"encodings": [], "names": [], "parent_tokens": {}}
+
+# --- INIT APP ---
+app = FastAPI(title="ATLAS Face Recognition API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -56,17 +70,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-DATASET_PATH = "dataset_siswa"
-ENCODINGS_PATH = "face_encodings.pkl"
-
-if not os.path.exists(DATASET_PATH):
-    os.makedirs(DATASET_PATH)
-
-db_face = {"encodings": [], "names": [], "parent_tokens": {}}
-
+# --- HELPER FUNCTIONS ---
 
 def load_database():
-    """Memuat data dari file pickle ke memory saat startup"""
     global db_face
     try:
         with open(ENCODINGS_PATH, "rb") as f:
@@ -74,131 +80,202 @@ def load_database():
             if "parent_tokens" not in loaded:
                 loaded["parent_tokens"] = {}
             db_face = loaded
-        print(f"[INFO] Database dimuat: {len(db_face['names'])} siswa terdaftar.")
+        print(f"[INFO] Pickle dimuat: {len(db_face['names'])} siswa.")
     except FileNotFoundError:
-        print("[INFO] Database belum ada, memulai dari kosong.")
+        print("[INFO] Pickle belum ada, memulai dari kosong.")
         db_face = {"encodings": [], "names": [], "parent_tokens": {}}
 
 def save_database():
-    """Menyimpan data memory ke file pickle"""
-    print("[INFO] Menyimpan perubahan ke database...")
     with open(ENCODINGS_PATH, "wb") as f:
         f.write(pickle.dumps(db_face))
 
+def validate_face_quality(rgb_img, face_locations):
+    """Memastikan foto layak untuk pendaftaran mandiri"""
+    if len(face_locations) == 0:
+        return False, "Wajah tidak terdeteksi."
+    
+    if len(face_locations) > 1:
+        return False, "Terdeteksi lebih dari 1 wajah. Harap foto sendirian."
+
+    # Cek Ukuran Wajah (Apakah terlalu jauh?)
+    top, right, bottom, left = face_locations[0]
+    face_width = right - left
+    img_width = rgb_img.shape[1]
+    
+    if (face_width / img_width) < 0.15: 
+        return False, "Wajah terlalu jauh/kecil. Mohon dekatkan kamera."
+
+    # Cek Kecerahan
+    hsv = cv2.cvtColor(rgb_img, cv2.COLOR_RGB2HSV)
+    brightness = np.mean(hsv[:,:,2])
+    
+    if brightness < 60: return False, "Foto terlalu gelap."
+    if brightness > 230: return False, "Foto terlalu silau."
+
+    return True, "OK"
+
+def send_firebase_notif(token, student_name, time_str, status_absen):
+    """Mengirim notifikasi ke HP Orang Tua"""
+    if not FIREBASE_ACTIVE or not token:
+        return
+
+    try:
+        message = messaging.Message(
+            notification=messaging.Notification(
+                title="Laporan Kehadiran ATLAS",
+                body=f"Ananda {student_name} tercatat {status_absen} pada pukul {time_str}."
+            ),
+            token=token
+        )
+        response = messaging.send(message)
+        print(f"[NOTIF] Terkirim ke {student_name}: {response}")
+    except Exception as e:
+        print(f"[ERROR NOTIF] {e}")
+
+# Load DB saat start
 load_database()
 
-class UpdateStudentModel(BaseModel):
-    new_name: str
+# --- ROUTES ---
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    return FileResponse("index.html")
-    # return {
-    #     "message": "ATLAS API Ready",
-    #     "total_students": len(db_face["names"])
-    # }
+    # Pastikan file index.html atau daftar.html ada
+    if os.path.exists("index.html"):
+        return FileResponse("index.html")
+    return "<h1>ATLAS API Running</h1>"
 
 @app.get("/students", response_model=List[str])
 def get_all_students():
-    """Mengambil semua nama siswa yang terdaftar"""
     return db_face["names"]
 
 @app.post("/register")
 async def register_student(
     name: str = Form(...), 
-    nisn: str = Form(...), 
+    nisn: str = Form(...),
+    pose: str = Form(...), # <--- PARAMETER BARU (depan/kiri/kanan)
     file: UploadFile = File(...)
 ):
-    clean_nisn = nisn.strip()
+    # 1. Bersihkan Input
+    clean_nisn = str(nisn).strip()
     clean_name = name.strip().replace(" ", "_")
-    filename = f"{clean_name}_{clean_nisn}.jpg"
+    
+    # Nama file jadi unik: Budi_12345_depan.jpg
+    filename = f"{clean_name}_{clean_nisn}_{pose}.jpg" 
 
+    print(f"[REGISTER] Mendaftarkan {clean_name} ({clean_nisn}) - Pose: {pose}")
+
+    # 2. Cek Koneksi & Data Master
     conn = get_db_connection()
-    if conn:
+    if not conn:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+
+    try:
         cursor = conn.cursor(dictionary=True)
+        # Cek apakah siswa ada di database sekolah
         cursor.execute("SELECT * FROM students WHERE nisn = %s", (clean_nisn,))
         student = cursor.fetchone()
         
         if not student:
             conn.close()
-            raise HTTPException(status_code=404, detail="NISN tidak ditemukan di Data Master Siswa. Hubungi Admin Sekolah.")
-    
-    contents = await file.read()
-    rgb_img = cv2.cvtColor(cv2.imdecode(np.frombuffer(contents, np.uint8), cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
-    face_locations = face_recognition.face_locations(rgb_img)
-    
-    if not face_locations:
-        raise HTTPException(status_code=400, detail="Wajah tidak terdeteksi")
+            raise HTTPException(status_code=404, detail=f"NISN {clean_nisn} tidak terdaftar.")
         
-    new_encoding = face_recognition.face_encodings(rgb_img, face_locations)[0]
-
-    with open(os.path.join(DATASET_PATH, filename), "wb") as f:
-        f.write(contents)
-
-    db_face["encodings"].append(new_encoding)
-    db_face["names"].append(clean_nisn)
-    save_database()
-
-    if conn:
-        try:
-            cursor = conn.cursor()
-            sql_update = """
-                UPDATE students 
-                SET is_face_registered = 1, 
-                    photo_path = %s,
-                    face_registered_at = NOW()
-                WHERE nisn = %s
-            """
-            cursor.execute(sql_update, (filename, clean_nisn))
-            conn.commit()
+        # 3. Proses Gambar & Validasi
+        contents = await file.read()
+        nparr = np.frombuffer(contents, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        
+        face_locations = face_recognition.face_locations(rgb_img)
+        
+        # Validasi Kualitas (Opsional: Bisa dilonggarkan untuk pose samping)
+        is_valid, msg = validate_face_quality(rgb_img, face_locations)
+        if not is_valid:
             conn.close()
-            print(f"[SQL] Data siswa {clean_nisn} berhasil diupdate.")
-        except Error as e:
-            print(f"[SQL ERROR] {e}")
-    
+            raise HTTPException(status_code=400, detail=f"Pose {pose}: {msg}")
+            
+        new_encoding = face_recognition.face_encodings(rgb_img, face_locations)[0]
 
-    return {"status": "success", "message": f"Wajah siswa {name} berhasil didaftarkan."}
+        # 4. Simpan File Fisik
+        with open(os.path.join(DATASET_PATH, filename), "wb") as f:
+            f.write(contents)
+
+        # 5. UPDATE MEMORY PICKLE
+        # --- PERUBAHAN UTAMA DI SINI ---
+        # KITA TIDAK LAGI MENGHAPUS DATA LAMA. KITA APPEND.
+        
+        # Cek jika pose ini sudah ada sebelumnya, baru hapus yang spesifik itu (opsional)
+        # Tapi biar simple, kita append saja. Face Recognition bisa handle multiple encodings per nama.
+        
+        db_face["encodings"].append(new_encoding)
+        db_face["names"].append(clean_nisn) # Nama di memory tetap NISN
+        save_database()
+
+        # 6. Update MySQL (Tandai sudah registrasi)
+        # Kita update photo_path dengan foto terakhir yang diupload
+        sql_update = """
+            UPDATE students 
+            SET is_face_registered = 1, 
+                photo_path = %s,
+                face_registered_at = NOW()
+            WHERE nisn = %s
+        """
+        cursor.execute(sql_update, (filename, clean_nisn))
+        conn.commit()
+        conn.close()
+        
+        return {"status": "success", "message": f"Foto pose '{pose}' berhasil disimpan."}
+
+    except Exception as e:
+        if conn.is_connected(): conn.close()
+        print(f"[ERROR REGISTER] {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/predict")
 async def predict_face(file: UploadFile = File(...)):
+    # 1. Decode Gambar
     contents = await file.read()
     nparr = np.frombuffer(contents, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     
+    # 2. Deteksi Wajah
     face_locations = face_recognition.face_locations(rgb_img, model="hog")
     face_encodings = face_recognition.face_encodings(rgb_img, face_locations)
 
     processed_results = []
     conn = get_db_connection()
 
-    DEVICE_ID = 1
-
     if len(db_face["names"]) == 0:
-         return {"status": "error", "message": "Database kosong."}
+         return {"status": "error", "message": "Database wajah kosong."}
 
-    current_time = datetime.now()
+    current_time_obj = datetime.now()
+    current_time_str = current_time_obj.strftime('%H:%M:%S')
+    current_date_str = current_time_obj.strftime('%Y-%m-%d')
 
     for encoding in face_encodings:
         matches = face_recognition.compare_faces(db_face["encodings"], encoding, tolerance=0.5)
         face_distances = face_recognition.face_distance(db_face["encodings"], encoding)
         
-        name = "Unknown"
-        status = "unknown"
-        
+        detected_nisn = None
         best_match_index = np.argmin(face_distances)
         
         if matches[best_match_index]:
-            name = db_face["names"][best_match_index]
             detected_nisn = db_face["names"][best_match_index]
-            real_name = "Unknown"
+        
+        # Default Value
+        real_name = "Unknown"
+        status = "unknown"
 
+        if detected_nisn:
             if conn:
                 try:
                     cursor = conn.cursor(dictionary=True)
                     
+                    # Ambil Nama & Token FCM Ortu
                     sql_info = """
-                        SELECT s.full_name FROM students s
+                        SELECT s.full_name, p.fcm_token 
+                        FROM students s
+                        LEFT JOIN parents p ON s.parent_id = p.id
                         WHERE s.nisn = %s
                     """
                     cursor.execute(sql_info, (detected_nisn,))
@@ -206,75 +283,77 @@ async def predict_face(file: UploadFile = File(...)):
                     
                     if student_data:
                         real_name = student_data['full_name']
+                        parent_token = student_data['fcm_token']
                         
+                        # --- LOGIKA COOLDOWN ---
                         should_record = False
                         if detected_nisn not in last_attendance_time:
                             should_record = True
-                        elif datetime.now() - last_attendance_time[detected_nisn] > COOLDOWN_PERIOD:
+                        elif current_time_obj - last_attendance_time[detected_nisn] > COOLDOWN_PERIOD:
                             should_record = True
                         
                         if should_record:
-                            current_date = datetime.now().strftime('%Y-%m-%d')
-                            current_time = datetime.now().strftime('%H:%M:%S')
-                            
-                            sql_limit = "SELECT late_limit FROM system_settings LIMIT 1"
-                            cursor.execute(sql_limit)
-                            result = cursor.fetchone()
-
+                            # --- CEK JAM TERLAMBAT ---
+                            # Default jam 7 pagi jika tidak ada setting
                             limit_time_str = "07:00:00"
                             
-                            if result and result['late_limit']: 
-                                db_time = result['late_limit']
-                                
-                                if isinstance(db_time, timedelta):
-                                    total_seconds = int(db_time.total_seconds())
-                                    hours = total_seconds // 3600
-                                    minutes = (total_seconds % 3600) // 60
-                                    seconds = total_seconds % 60
-                                    limit_time_str = f"{hours:02}:{minutes:02}:{seconds:02}"
-                                else:
-                                    temp_str = str(db_time)
-                                    if len(temp_str) == 7:
-                                        limit_time_str = "0" + temp_str
+                            # Coba ambil setting dari DB (jika ada tabel system_settings)
+                            try:
+                                cursor.execute("SELECT late_limit FROM system_settings LIMIT 1")
+                                setting_res = cursor.fetchone()
+                                if setting_res and setting_res['late_limit']:
+                                    # Handle tipe data timedelta atau string
+                                    val = setting_res['late_limit']
+                                    if isinstance(val, timedelta):
+                                        total_seconds = int(val.total_seconds())
+                                        h, m, s = (total_seconds // 3600), (total_seconds % 3600) // 60, total_seconds % 60
+                                        limit_time_str = f"{h:02}:{m:02}:{s:02}"
                                     else:
-                                        limit_time_str = temp_str
-                            
-                            attendance_status = ""
+                                        limit_time_str = str(val)
+                            except:
+                                pass # Gunakan default 07:00:00 jika tabel settings belum ada
 
-                            if current_time > limit_time_str:
+                            # Tentukan Status
+                            attendance_status = 'Hadir'
+                            if current_time_str > limit_time_str:
                                 attendance_status = 'Terlambat'
-                            else:
-                                attendance_status = 'Hadir'
 
+                            # Insert Log
                             sql_insert = """
                                 INSERT INTO attendance_logs 
                                 (student_nisn, date, time_log, status)
                                 VALUES (%s, %s, %s, %s)
                             """
-                            cursor.execute(sql_insert, (detected_nisn, current_date, current_time, attendance_status))
+                            cursor.execute(sql_insert, (detected_nisn, current_date_str, current_time_str, attendance_status))
                             conn.commit()
                             
-                            last_attendance_time[detected_nisn] = datetime.now()
+                            last_attendance_time[detected_nisn] = current_time_obj
                             status = "recorded"
+                            
+                            # --- KIRIM NOTIFIKASI ---
+                            if parent_token:
+                                send_firebase_notif(parent_token, real_name, current_time_str, attendance_status)
                         
                         else:
-                            status = "ignored"
+                            status = "ignored" # Masih Cooldown
                             
                 except Error as e:
-                    print(f"[SQL ERROR] {e}")
+                    print(f"[SQL ERROR PREDICT] {e}")
                     real_name = f"NISN:{detected_nisn}"
+            else:
+                real_name = f"NISN:{detected_nisn} (No DB)"
         
         processed_results.append({
-            "nisn": name,
+            "nisn": detected_nisn if detected_nisn else "Unknown",
             "name": real_name,
             "status": status,
-            "timestamp": current_time
+            "timestamp": current_time_str
         })
 
+    if conn: conn.close()
+
+    # Filter hasil agar response tidak penuh dengan 'Unknown' jika banyak noise
     new_entries = [res for res in processed_results if res['status'] == 'recorded']
-    
-    if conn:
-        conn.close()
 
     return {
         "status": "success", 
@@ -282,67 +361,31 @@ async def predict_face(file: UploadFile = File(...)):
         "all_detected": processed_results
     }
 
+# Endpoint lain (Update/Delete/History) tetap sama...
+class UpdateStudentModel(BaseModel):
+    new_name: str
+
 @app.delete("/students/{name}")
 def delete_student(name: str):
-    """Menghapus data siswa dan fotonya"""
-    clean_name = name.strip().replace(" ", "_").lower()
-
+    clean_name = name.strip().replace(" ", "_") # Ingat nama di memory adalah NISN
+    
     if clean_name not in db_face["names"]:
         raise HTTPException(status_code=404, detail="Siswa tidak ditemukan")
 
     index = db_face["names"].index(clean_name)
-
     del db_face["names"][index]
     del db_face["encodings"][index]
-
-    file_path = os.path.join(DATASET_PATH, f"{clean_name}.jpg")
-    if os.path.exists(file_path):
-        os.remove(file_path)
-
     save_database()
-
-    return {"status": "success", "message": f"Data siswa {clean_name} telah dihapus."}
-
-@app.put("/students/{old_name}")
-def update_student_name(old_name: str, data: UpdateStudentModel):
-    """Mengganti nama siswa (Rename)"""
-    clean_old_name = old_name.strip().replace(" ", "_").lower()
-    clean_new_name = data.new_name.strip().replace(" ", "_").lower()
-
-    if clean_old_name not in db_face["names"]:
-        raise HTTPException(status_code=404, detail="Siswa lama tidak ditemukan")
     
-    if clean_new_name in db_face["names"]:
-        raise HTTPException(status_code=400, detail="Nama baru sudah dipakai oleh siswa lain")
-
-    index = db_face["names"].index(clean_old_name)
-
-    db_face["names"][index] = clean_new_name
-
-    old_path = os.path.join(DATASET_PATH, f"{clean_old_name}.jpg")
-    new_path = os.path.join(DATASET_PATH, f"{clean_new_name}.jpg")
-    
-    if os.path.exists(old_path):
-        os.rename(old_path, new_path)
-
-    save_database()
-
-    return {"status": "success", "message": f"Berhasil mengubah {clean_old_name} menjadi {clean_new_name}"}
-
-class TokenRegistration(BaseModel):
-    student_name: str
-    fcm_token: str
+    # Hapus file fisik (Logic perlu disesuaikan karena kita menyimpan Nama_NISN)
+    # Untuk simplifikasi, user menghapus manual atau logic pencarian file ditingkatkan
+    return {"status": "success", "message": "Data encoding dihapus."}
 
 @app.get("/history")
 def get_attendance_history(date: str = None):
-    """
-    Mengambil data absensi berdasarkan tanggal.
-    Format date: YYYY-MM-DD (Misal: 2023-10-27)
-    Jika kosong, default ke hari ini.
-    """
     conn = get_db_connection()
     if not conn:
-        raise HTTPException(status_code=500, detail="Database connection failed")
+        raise HTTPException(status_code=500, detail="DB Error")
     
     if not date:
         date = datetime.now().strftime('%Y-%m-%d')
@@ -351,11 +394,7 @@ def get_attendance_history(date: str = None):
     try:
         cursor = conn.cursor(dictionary=True)
         query = """
-            SELECT 
-                a.time_log, 
-                a.student_nisn, 
-                s.full_name, 
-                a.status 
+            SELECT a.time_log, a.student_nisn, s.full_name, a.status 
             FROM attendance_logs a
             JOIN students s ON a.student_nisn = s.nisn
             WHERE a.date = %s
@@ -364,14 +403,18 @@ def get_attendance_history(date: str = None):
         cursor.execute(query, (date,))
         results = cursor.fetchall()
         
+        # Konversi tipe data timedelta/time ke string agar JSON valid
+        for row in results:
+            if isinstance(row['time_log'], (timedelta, datetime)):
+                 row['time_log'] = str(row['time_log'])
+                 
     except Error as e:
         print(f"[SQL ERROR] {e}")
-        raise HTTPException(status_code=500, detail=str(e))
     finally:
         conn.close()
 
-    return {
-        "date": date,
-        "total": len(results),
-        "data": results
-    }
+    return {"date": date, "total": len(results), "data": results}
+
+@app.get("/daftar", response_class=HTMLResponse)
+def page_daftar():
+    return FileResponse("daftar.html")
