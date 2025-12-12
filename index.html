@@ -1,0 +1,958 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ATLAS - Monitor CCTV Kelas</title>
+    <style>
+        :root {
+            --bg-dark: #0d1117;
+            --bg-panel: #161b22;
+            --accent: #58a6ff;
+            --accent-hover: #388bfd;
+            --text-main: #f0f6fc;
+            --text-muted: #8b949e;
+            --input-bg: #21262d;
+            --border-color: #30363d;
+            --success: #238636;
+            --danger: #da3633;
+        }
+
+        body {
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: linear-gradient(135deg, var(--bg-dark) 0%, #0a0d14 100%);
+            color: var(--text-main);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            height: 90vh;
+            gap: 20px;
+            overflow: hidden;
+        }
+
+        /* Scrollbar Global */
+        ::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--input-bg);
+            border-radius: 5px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 5px;
+            border: 2px solid var(--input-bg);
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--accent);
+        }
+
+        ::-webkit-scrollbar-corner {
+            background: var(--input-bg);
+        }
+
+        .left-panel {
+            flex: 2;
+            display: flex;
+            flex-direction: column;
+            background: var(--bg-panel);
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            border: 1px solid var(--border-color);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .header-cam {
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 15px;
+        }
+
+        .header-cam h3 {
+            margin: 0;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            color: var(--accent);
+        }
+
+        .video-wrapper {
+            width: 100%;
+            height: 100%;
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 2px solid var(--border-color);
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .camera-selection {
+            width: 100%;
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        select {
+            flex: 1;
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            background: var(--input-bg);
+            color: var(--text-main);
+            font-size: 14px;
+            outline: none;
+            transition: all 0.2s ease;
+        }
+
+        select:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.2);
+        }
+
+        .btn-icon {
+            padding: 0 15px;
+            background: var(--input-bg);
+            color: var(--text-main);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-icon:hover {
+            background: var(--accent);
+            border-color: var(--accent);
+        }
+
+        .controls {
+            margin-top: 15px;
+            width: 100%;
+            display: flex;
+            gap: 15px;
+        }
+
+        button.action-btn {
+            flex: 1;
+            padding: 14px;
+            border: none;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        #btn-cctv {
+            background: var(--input-bg);
+            color: var(--text-main);
+            border: 1px solid var(--border-color);
+        }
+
+        #btn-cctv:hover {
+            background: var(--accent);
+            border-color: var(--accent);
+        }
+
+        #btn-cctv.active {
+            background: var(--success);
+            border-color: var(--success);
+        }
+
+        #btn-daftar {
+            background: var(--accent);
+            color: white;
+        }
+
+        #btn-daftar:hover {
+            background: var(--accent-hover);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(88, 166, 255, 0.3);
+        }
+
+        .right-panel {
+            flex: 1;
+            background: var(--bg-panel);
+            border-radius: 12px;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            border: 1px solid var(--border-color);
+            overflow: hidden;
+        }
+
+        .right-panel h2 {
+            margin-top: 0;
+            border-bottom: 2px solid var(--accent);
+            padding-bottom: 15px;
+            font-size: 1.2rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--accent);
+        }
+
+        #log-container {
+            overflow-y: auto;
+            flex: 1;
+            padding-right: 10px;
+            margin-right: -5px;
+        }
+
+        .log-item {
+            background: linear-gradient(135deg, var(--input-bg) 0%, #1c2128 100%);
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            animation: slideIn 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
+            border-left: 4px solid var(--accent);
+            border: 1px solid var(--border-color);
+            transition: transform 0.2s ease;
+        }
+
+        .log-item:hover {
+            transform: translateX(4px);
+        }
+
+        .log-item .name {
+            font-weight: 700;
+            font-size: 15px;
+            color: var(--text-main);
+        }
+
+        .log-item .nisn {
+            font-size: 12px;
+            color: var(--accent);
+            margin-bottom: 2px;
+        }
+
+        .log-item .time {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        .status-dot {
+            height: 12px;
+            width: 12px;
+            background-color: var(--text-muted);
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+            transition: all 0.3s ease;
+        }
+
+        .recording {
+            background-color: var(--danger);
+            box-shadow: 0 0 10px var(--danger);
+            animation: blink 1.5s infinite;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 9999;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(13, 17, 23, 0.9);
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            backdrop-filter: blur(8px);
+            overflow-y: auto;
+        }
+
+        .modal.show {
+            display: block;
+            opacity: 1;
+        }
+
+        .modal-content {
+            background: linear-gradient(135deg, var(--bg-panel) 0%, #1c2128 100%);
+            margin: 5vh auto;
+            padding: 30px;
+            border: 1px solid var(--border-color);
+            width: 90%;
+            max-width: 450px;
+            border-radius: 12px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            transform: translateY(-20px);
+            transition: transform 0.3s ease;
+            position: relative;
+            color: var(--text-main);
+            max-height: 85vh;
+            overflow-y: auto;
+        }
+
+        .modal.show .modal-content {
+            transform: translateY(0);
+        }
+
+        .modal-lg {
+            max-width: 800px !important;
+        }
+
+        .custom-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            color: var(--text-main);
+            font-size: 14px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .custom-table thead {
+            background: linear-gradient(135deg, var(--input-bg) 0%, #1c2128 100%);
+            color: var(--accent);
+        }
+
+        .custom-table th,
+        .custom-table td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .custom-table tbody tr:hover {
+            background: rgba(88, 166, 255, 0.1);
+        }
+
+        .badge-success {
+            background-color: rgba(35, 134, 54, 0.2);
+            color: var(--success);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            border: 1px solid var(--success);
+        }
+
+        .close-button {
+            position: absolute;
+            right: 20px;
+            top: 20px;
+            color: var(--text-muted);
+            font-size: 24px;
+            cursor: pointer;
+            transition: color 0.2s;
+            background: none;
+            border: none;
+        }
+
+        .close-button:hover {
+            color: var(--accent);
+        }
+
+        .modal-header h2 {
+            margin: 0 0 20px 0;
+            font-size: 1.4rem;
+            color: var(--text-main);
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 12px;
+            background: var(--input-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            color: var(--text-main);
+            box-sizing: border-box;
+            font-size: 14px;
+            transition: all 0.2s ease;
+        }
+
+        .form-control:focus {
+            border-color: var(--accent);
+            outline: none;
+            box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.2);
+        }
+
+        input[type="file"] {
+            padding: 10px;
+            background: var(--input-bg);
+        }
+
+        input[type="file"]::file-selector-button {
+            margin-right: 15px;
+            border: none;
+            background: var(--accent);
+            padding: 8px 12px;
+            border-radius: 4px;
+            color: white;
+            cursor: pointer;
+            transition: background 0.2s ease;
+        }
+
+        input[type="file"]::file-selector-button:hover {
+            background: var(--accent-hover);
+        }
+
+        .btn-submit {
+            width: 100%;
+            padding: 14px;
+            background: var(--accent);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 10px;
+            transition: all 0.3s ease;
+        }
+
+        .btn-submit:hover {
+            background: var(--accent-hover);
+            transform: translateY(-2px);
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(20px);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes blink {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.4;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="left-panel">
+        <div class="header-cam">
+            <h3>MONITOR ABSENSI SISWA</h3>
+            <div><span id="status-indicator" class="status-dot"></span> <span id="status-text"
+                    style="font-size:14px;">Standby</span></div>
+        </div>
+
+        <div class="video-wrapper">
+            <video id="video" autoplay playsinline muted></video>
+            <canvas id="canvas" style="display:none;"></canvas>
+        </div>
+
+        <div class="camera-selection">
+            <select id="cameraSelect"></select>
+            <button id="btn-refresh" class="btn-icon" title="Refresh Kamera">🔁</button>
+        </div>
+
+        <div class="controls">
+            <button id="btn-cctv" class="action-btn" onclick="toggleCCTV()">▶ Start CCTV</button>
+            <button id="bt-daftar" class="action-btn" onclick="modalRegisFace()">+ Tambah Siswa</button>
+            <button id="bt-siswa" class="action-btn" onclick="tampilkanSiswaTerdaftar()">Data Siswa</button>
+        </div>
+        <p style="font-size: 12px; color: var(--text-muted); text-align: center; margin-top: 15px;">
+            Sistem mendeteksi wajah secara otomatis setiap 3 detik.
+        </p>
+    </div>
+
+    <div class="right-panel">
+        <h2>✅ Log Kehadiran</h2>
+        <div id="log-container">
+            <div style="text-align: center; color: var(--text-muted); margin-top: 40px; font-style: italic;">
+                Menunggu deteksi...
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const logContainer = document.getElementById('log-container');
+        const btnCCTV = document.getElementById('btn-cctv');
+        const statusDot = document.getElementById('status-indicator');
+        const statusText = document.getElementById('status-text');
+        const cameraSelect = document.getElementById('cameraSelect');
+        const btnRefresh = document.getElementById('btn-refresh');
+
+        let cctvInterval = null;
+        let isRunning = false;
+        let currentStream = null;
+
+        // --- SETUP KAMERA ---
+        async function populateCameraList() {
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const videoDevices = devices.filter(d => d.kind === 'videoinput');
+                cameraSelect.innerHTML = '';
+                videoDevices.forEach((device, idx) => {
+                    const option = document.createElement('option');
+                    option.value = device.deviceId;
+                    option.text = device.label || `Camera ${idx + 1}`;
+                    cameraSelect.appendChild(option);
+                });
+                if (videoDevices.length > 0 && !currentStream) startStream(videoDevices[0].deviceId);
+            } catch (err) { console.error(err); }
+        }
+
+        async function startStream(deviceId) {
+            if (currentStream) {
+                currentStream.getTracks().forEach(t => t.stop());
+            }
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { deviceId: deviceId ? { exact: deviceId } : undefined, width: { ideal: 1280 }, height: { ideal: 720 } },
+                    audio: false
+                });
+                currentStream = stream;
+                video.srcObject = stream;
+            } catch (err) { console.error(err); }
+        }
+
+        btnRefresh.addEventListener('click', populateCameraList);
+        cameraSelect.addEventListener('change', (e) => startStream(e.target.value));
+        navigator.mediaDevices.getUserMedia({ video: true }).then(s => { s.getTracks().forEach(t => t.stop()); populateCameraList(); }).catch(e => console.log(e));
+
+        // --- LOGIKA CCTV ---
+        function toggleCCTV() {
+            if (isRunning) {
+                clearInterval(cctvInterval);
+                isRunning = false;
+                btnCCTV.innerHTML = "▶ Start CCTV";
+                btnCCTV.classList.remove("active");
+                statusDot.classList.remove("recording");
+                statusText.innerText = "Standby";
+            } else {
+                isRunning = true;
+                btnCCTV.innerHTML = "⏹ Stop Monitoring";
+                btnCCTV.classList.add("active");
+                statusDot.classList.add("recording");
+                statusText.innerText = "Merekam...";
+                cctvInterval = setInterval(kirimFrame, 3000);
+            }
+        }
+
+        function kirimFrame() {
+            const ctx = canvas.getContext('2d');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            ctx.drawImage(video, 0, 0);
+            canvas.toBlob(async (blob) => {
+                const formData = new FormData();
+                formData.append("file", blob, "frame.jpg");
+                try {
+                    // Simulasi Response
+                    const res = await fetch("/predict", { method: "POST", body: formData });
+                    const data = await res.json();
+
+                    if (data.new_entries && data.new_entries.length > 0) {
+                        data.new_entries.forEach(siswa => {
+                            tambahLog(siswa.nisn, siswa.name, siswa.timestamp);
+                        });
+                    }
+                } catch (err) { console.error(err); }
+            }, 'image/jpeg', 0.7);
+        }
+
+        function tambahLog(nisn, name, waktu) {
+            if (logContainer.children[0] && logContainer.children[0].innerText.includes("Menunggu")) logContainer.innerHTML = "";
+            const div = document.createElement('div');
+            div.className = 'log-item';
+            div.innerHTML = `
+                <div>
+                    <div class="nisn">${nisn}</div>
+                    <div class="name">${name}</div>
+                    <div class="time">${waktu}</div>
+                </div>
+                <div style="color:#28a745">✅</div>
+            `;
+            logContainer.prepend(div);
+        }
+
+        // --- LOGIKA MODAL & FORM ---
+
+        async function getStudentData() {
+            try {
+                const response = await fetch('http://localhost:3000/api/students');
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                return data.map(siswa => ({
+                    nisn: siswa.nisn,
+                    nama: siswa.full_name
+                }));
+            } catch (error) {
+                console.error("Gagal mengambil data dari database:", error);
+                alert("Gagal terhubung ke database siswa.");
+                return [];
+            }
+        }
+
+        async function modalRegisFace() {
+            let modal = document.getElementById('registrationModal');
+            let cameraStream = null;
+            let imageBlob = null;
+
+            if (!modal) {
+                modal = document.createElement('div');
+                modal.id = 'registrationModal';
+                modal.className = 'modal';
+
+                const content = document.createElement('div');
+                content.className = 'modal-content';
+
+                content.innerHTML = `
+                    <span class="close-button">&times;</span>
+                    <div class="modal-header"><h2>Registrasi Wajah Siswa</h2></div>
+                    <form id="formDaftar">
+                        <div class="form-group">
+                            <label for="nisn">Pilih Siswa (NISN)</label>
+                            <select id="nisnSelect" name="nisn" class="form-control" required>
+                                <option value="">-- Memuat Data --</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="nama_lengkap">Nama Lengkap</label>
+                            <input type="text" id="nama_lengkap" name="nama" class="form-control" readonly placeholder="Otomatis terisi...">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Sumber Foto Wajah</label>
+                            <div style="display:flex; gap:10px; margin-bottom:10px;">
+                                <button type="button" id="btnStartCamera" class="btn-source">Buka Kamera</button>
+                                <button type="button" id="btnStopCamera" class="btn-source" style="display:none; background: #dc3545;">Tutup Kamera</button>
+                            </div>
+
+                            <div id="cameraArea" style="text-align:center; border: 1px solid #333; padding:10px; border-radius:8px;">
+                                <video id="videoElement" autoplay style="width:100%; max-width: 300px; display:none; border-radius:4px;"></video>
+                                <canvas id="canvasElement" style="display:none;"></canvas>
+                                
+                                <input type="file" id="foto_wajah" name="foto" accept="image/*" class="form-control" style="max-width:300px; margin: 0 auto;" required>
+                            </div>
+                            <p id="captureMessage" style="font-size:12px; color:#aaa; margin-top:5px; text-align:center; display:none;">Klik tombol di bawah untuk ambil gambar.</p>
+                        </div>
+
+                        <button type="button" id="btnCapture" class="btn-submit" style="background: #28a745; margin-bottom: 10px; display:none;">Ambil Foto Wajah</button>
+                        <button type="submit" class="btn-submit">Simpan Data Wajah</button>
+                    </form>
+                `;
+
+                modal.appendChild(content);
+                document.body.appendChild(modal);
+
+                const videoElement = content.querySelector('#videoElement');
+                const canvasElement = content.querySelector('#canvasElement');
+                const fileInput = content.querySelector('#foto_wajah');
+                const btnStart = content.querySelector('#btnStartCamera');
+                const btnStop = content.querySelector('#btnStopCamera');
+                const btnCapture = content.querySelector('#btnCapture');
+                const captureMessage = content.querySelector('#captureMessage');
+
+                const startCamera = async () => {
+                    try {
+                        cameraStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                        videoElement.srcObject = cameraStream;
+                        videoElement.style.display = 'block';
+                        fileInput.style.display = 'none';
+                        btnStart.style.display = 'none';
+                        btnStop.style.display = 'inline-block';
+                        btnCapture.style.display = 'block';
+                        captureMessage.style.display = 'block';
+                        imageBlob = null;
+                        fileInput.removeAttribute('required');
+                    } catch (err) {
+                        console.error("Gagal mengakses kamera:", err);
+                        alert("Akses kamera ditolak atau tidak ditemukan. Menggunakan input file.");
+                        stopCamera();
+                    }
+                };
+
+                const stopCamera = () => {
+                    if (cameraStream) {
+                        cameraStream.getTracks().forEach(track => track.stop());
+                        cameraStream = null;
+                    }
+                    videoElement.style.display = 'none';
+                    canvasElement.style.display = 'none';
+                    fileInput.style.display = 'block';
+                    btnStart.style.display = 'inline-block';
+                    btnStop.style.display = 'none';
+                    btnCapture.style.display = 'none';
+                    captureMessage.style.display = 'none';
+                    fileInput.setAttribute('required', 'required');
+                    imageBlob = null;
+                };
+
+                const captureImage = () => {
+                    canvasElement.width = videoElement.videoWidth;
+                    canvasElement.height = videoElement.videoHeight;
+                    canvasElement.getContext('2d').drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
+
+                    canvasElement.style.display = 'block';
+                    videoElement.style.display = 'none';
+
+                    canvasElement.toBlob((blob) => {
+                        imageBlob = blob;
+                        alert("Foto berhasil diambil! Klik 'Simpan Data Wajah' untuk upload.");
+                        btnCapture.innerText = "✅ Foto Diambil (Ambil Lagi?)";
+                    }, 'image/jpeg');
+                };
+
+                btnStart.onclick = startCamera;
+                btnStop.onclick = stopCamera;
+                btnCapture.onclick = captureImage;
+
+                const form = content.querySelector('#formDaftar');
+                const selectNISN = content.querySelector('#nisnSelect');
+                const inputNama = content.querySelector('#nama_lengkap');
+                const closeBtn = content.querySelector('.close-button');
+
+                let originalCloseFn = () => {
+                    modal.classList.remove('show');
+                    setTimeout(() => modal.style.display = 'none', 300);
+                };
+
+                let closeFn = () => {
+                    stopCamera();
+                    originalCloseFn();
+                };
+
+                closeBtn.onclick = closeFn;
+                window.onclick = (e) => { if (e.target == modal) closeFn(); };
+
+                fileInput.onchange = () => {
+                    if (fileInput.files.length > 0) {
+                        imageBlob = null;
+                        btnCapture.innerText = "📸 Ambil Foto Wajah";
+                    }
+                };
+
+                const siswaList = await getStudentData();
+                selectNISN.innerHTML = '<option value="">-- Pilih Siswa --</option>';
+                siswaList.forEach(s => {
+                    const opt = document.createElement('option');
+                    opt.value = s.nisn;
+                    opt.text = `${s.nisn} - ${s.nama}`;
+                    opt.dataset.nama = s.nama;
+                    selectNISN.appendChild(opt);
+                });
+
+                selectNISN.onchange = function () {
+                    const selected = this.options[this.selectedIndex];
+                    inputNama.value = selected.dataset.nama || "";
+                };
+
+                form.onsubmit = async (e) => {
+                    e.preventDefault();
+
+                    const btn = form.querySelector('button[type="submit"]');
+                    const originalText = btn.innerText;
+                    btn.innerText = "Sedang Memproses...";
+                    btn.disabled = true;
+
+                    try {
+                        const fileInput = document.getElementById('foto_wajah');
+                        const nisnVal = selectNISN.value;
+                        const namaVal = inputNama.value;
+                        let fileToUpload = null;
+
+                        if (imageBlob) {
+                            fileToUpload = imageBlob;
+                        } else if (fileInput.files[0]) {
+                            fileToUpload = fileInput.files[0];
+                        } else {
+                            throw new Error("Harap ambil foto dari kamera atau pilih file gambar!");
+                        }
+
+                        if (!nisnVal) {
+                            throw new Error("Silakan pilih siswa terlebih dahulu!");
+                        }
+                        if (!fileToUpload) {
+                            throw new Error("File foto tidak tersedia.");
+                        }
+
+                        const formData = new FormData();
+                        formData.append("nisn", nisnVal);
+                        formData.append("name", namaVal);
+                        formData.append("file", fileToUpload, "face_capture.jpg");
+
+                        const response = await fetch("http://localhost:8000/register", {
+                            method: "POST",
+                            body: formData
+                        });
+
+                        if (!response.ok) {
+                            const errorData = await response.json();
+                            throw new Error(errorData.detail || `Gagal mendaftar (Status: ${response.status})`);
+                        }
+
+                        const result = await response.json();
+                        alert(`✅ BERHASIL: ${result.message}`);
+
+                        form.reset();
+                        closeFn();
+                    } catch (error) {
+                        console.error("Registration Error:", error);
+                        alert(`❌ GAGAL: ${error.message}`);
+                    } finally {
+                        btn.innerText = originalText;
+                        btn.disabled = false;
+                    }
+                }
+            }
+
+            modal.style.display = 'block';
+            requestAnimationFrame(() => modal.classList.add('show'));
+        }
+
+        async function tampilkanSiswaTerdaftar() {
+            let modal = document.getElementById('listModal');
+
+            if (!modal) {
+                modal = document.createElement('div');
+                modal.id = 'listModal';
+                modal.className = 'modal';
+
+                const content = document.createElement('div');
+                content.className = 'modal-content modal-lg';
+
+                content.innerHTML = `
+                    <span class="close-button-list" style="float:right; font-size:28px; cursor:pointer; color:#aaa;">&times;</span>
+                    <div class="modal-header" style="border-bottom:1px solid #333; margin-bottom:15px;">
+                        <h2>📋 Database Wajah Terdaftar</h2>
+                        <p style="color:#aaa; font-size:13px;">Menampilkan siswa dengan status <b>is_face_registered = 1</b></p>
+                    </div>
+                    
+                    <div style="overflow-x: auto;">
+                        <table class="custom-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 50px;">No</th>
+                                    <th>NISN</th>
+                                    <th>Nama Lengkap</th>
+                                    <th>Status</th>
+                                    <th>Waktu Daftar</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tableBodySiswa">
+                                <tr><td colspan="5" style="text-align:center;">Memuat data...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <div style="margin-top: 20px; text-align: right;">
+                        <button id="btnRefreshList" style="padding: 8px 15px; background:#0f3460; color:white; border:none; border-radius:4px; cursor:pointer;">🔄 Refresh Data</button>
+                    </div>
+                `;
+
+                modal.appendChild(content);
+                document.body.appendChild(modal);
+
+                const closeBtn = content.querySelector('.close-button-list');
+                const closeFn = () => {
+                    modal.classList.remove('show');
+                    setTimeout(() => modal.style.display = 'none', 300);
+                };
+                closeBtn.onclick = closeFn;
+
+                modal.onclick = (e) => { if (e.target == modal) closeFn(); };
+
+                content.querySelector('#btnRefreshList').onclick = () => loadDataToTable();
+            }
+
+            modal.style.display = 'block';
+            requestAnimationFrame(() => modal.classList.add('show'));
+
+            async function loadDataToTable() {
+                const tbody = document.getElementById('tableBodySiswa');
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px;">⏳ Sedang mengambil data...</td></tr>';
+
+                try {
+                    const response = await fetch('http://localhost:3000/api/registered-students');
+
+                    if (!response.ok) throw new Error("Gagal mengambil data dari server.");
+
+                    const data = await response.json();
+
+                    tbody.innerHTML = '';
+
+                    if (data.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px;">Belum ada siswa yang mendaftarkan wajah.</td></tr>';
+                        return;
+                    }
+
+                    data.forEach((siswa, index) => {
+                        const rawDate = siswa.face_registered_at;
+                        const formattedDate = rawDate ? new Date(rawDate).toLocaleString('id-ID') : '-';
+
+                        const row = `
+                            <tr>
+                                <td>${index + 1}</td>
+                                <td style="font-family:monospace; font-size:1.1em;">${siswa.nisn}</td>
+                                <td style="font-weight:bold;">${siswa.full_name}</td>
+                                <td><span class="badge-success">Terdaftar</span></td>
+                                <td style="font-size:0.9em; color:#aaa;">${formattedDate}</td>
+                            </tr>
+                        `;
+                        tbody.innerHTML += row;
+                    });
+
+                } catch (error) {
+                    console.error(error);
+                    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:red; padding:20px;">❌ Error: ${error.message}</td></tr>`;
+                }
+            }
+
+            loadDataToTable();
+        }
+    </script>
+</body>
+
+</html>
