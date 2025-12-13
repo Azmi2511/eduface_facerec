@@ -10,7 +10,7 @@ const db = mysql.createConnection({
     host: 'localhost',
     user: 'root',     
     password: '',      
-    database: 'atlas' 
+    database: 'eduface' 
 });
 
 db.connect(err => {
