@@ -22,7 +22,7 @@ DB_CONFIG = {
     'host': 'localhost',
     'user': 'root',
     'password': '',
-    'database': 'atlas'
+    'database': 'eduface'
 }
 
 def get_db_connection():
@@ -273,9 +273,9 @@ async def predict_face(file: UploadFile = File(...)):
                     
                     # Ambil Nama & Token FCM Ortu
                     sql_info = """
-                        SELECT s.full_name, p.fcm_token 
-                        FROM students s
-                        LEFT JOIN parents p ON s.parent_id = p.id
+                        SELECT u.full_name 
+                        FROM users u
+                        JOIN students s ON u.id = s.user_id
                         WHERE s.nisn = %s
                     """
                     cursor.execute(sql_info, (detected_nisn,))
@@ -283,7 +283,6 @@ async def predict_face(file: UploadFile = File(...)):
                     
                     if student_data:
                         real_name = student_data['full_name']
-                        parent_token = student_data['fcm_token']
                         
                         # --- LOGIKA COOLDOWN ---
                         should_record = False
@@ -317,22 +316,9 @@ async def predict_face(file: UploadFile = File(...)):
                             attendance_status = 'Hadir'
                             if current_time_str > limit_time_str:
                                 attendance_status = 'Terlambat'
-
-                            # Insert Log
-                            sql_insert = """
-                                INSERT INTO attendance_logs 
-                                (student_nisn, date, time_log, status)
-                                VALUES (%s, %s, %s, %s)
-                            """
-                            cursor.execute(sql_insert, (detected_nisn, current_date_str, current_time_str, attendance_status))
-                            conn.commit()
                             
                             last_attendance_time[detected_nisn] = current_time_obj
                             status = "recorded"
-                            
-                            # --- KIRIM NOTIFIKASI ---
-                            if parent_token:
-                                send_firebase_notif(parent_token, real_name, current_time_str, attendance_status)
                         
                         else:
                             status = "ignored" # Masih Cooldown
